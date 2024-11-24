@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Marker Based AR with AR.js and Three.js</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/3.1.0/three.js/build/ar.js"></script>
+    <script src="./CSVManager.js" type="module"></script>
+  </head>
+  <body>
+    <script type="module">
+      import { loadCSVData, normalizeData, calculateMinMax, normalizedline } from './CSVManager.js';
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true
+      });
+      renderer.setClearColor(new THREE.Color(), 0);
+      renderer.setSize(640, 480);
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.top = '0px';
+      renderer.domElement.style.left = '0px';
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.visible = false;
+      const camera = new THREE.Camera();
+      scene.add(camera);
+
+      const arToolkitSource = new THREEx.ArToolkitSource({
+        sourceType: 'webcam'
+      });
+
+      arToolkitSource.init(() => {
+        setTimeout(() => {
+          onResize();
+        }, 2000);
+      });
+
+      addEventListener('resize', () => {
+        onResize();
+      });
+
+      function onResize() {
+        arToolkitSource.onResizeElement();
+        arToolkitSource.copyElementSizeTo(renderer.domElement);
+        if (arToolkitContext.arController !== null) {
+          arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);
+        }
+      }
+
+      const arToolkitContext = new THREEx.ArToolkitContext({
+        cameraParametersUrl: 'data/camera_para.dat',
+        detectionMode: 'mono'
+      });
+
+      arToolkitContext.init(() => {
+        camera.projectionMatrix.copy(arToolkitContext.getProjectionMatrix());
+      });
+
+      const arMarkerControls = new THREEx.ArMarkerControls(arToolkitContext, camera, {
+        type: 'pattern',
+        patternUrl: 'data/patt.hiro',
+        changeMatrixMode: 'cameraTransformMatrix'
+      });
+
+      async function createScatterPlot() {
+        const data = await loadCSVData('data/points.csv');
+        const normalizedData = normalizeData(data); // データを0-1に正規化
+        const line = normalizedline(data);
+        const { min, max } = calculateMinMax(data); // 元データの最小値・最大値
+
+        normalizedData.forEach(point => {
+          const geometry = new THREE.SphereGeometry(0.02, 16, 16);
+          const material = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+          const sphere = new THREE.Mesh(geometry, material);
+
+          sphere.position.set(point.x, point.y, point.z);
+          scene.add(sphere);
+        });
+
+        addAxesWithLabels(min, max, line);
+      }
+
+      function addAxesWithLabels(min, max, line) {
+        const axisMaterial = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 });
+
+        // 各軸 (X, Y, Z)
+        addAxis('X', 0, 1, min.x, max.x, new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0));
+        addAxis('Y', 0, 1, min.y, max.y, new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0));
+        addAxis('Z', 0, 1, min.z, max.z, new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0));
+        drawAxis(line, 0, 1, new THREE.Vector3(1, 0, 0));
+        drawAxis(line, 0, 1, new THREE.Vector3(0, 1, 0));
+        drawAxis(line, 0, 1, new THREE.Vector3(0, 0, 1));
+      }
+
+      function addAxis(label, axisMin, axisMax, dataMin, dataMax, direction, perpendicular) {
+        const loader = new THREE.FontLoader();
+        loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', font => {
+          const textMaterial = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.8 });
+          const blackTextMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 }); // 黒いラベル用
+
+          // 軸の線を描画
+          const lineMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
+          const geometry = new THREE.BufferGeometry().setFromPoints([
+            direction.clone().multiplyScalar(axisMin),
+            direction.clone().multiplyScalar(axisMax)
+          ]);
+          const axis = new THREE.Line(geometry, lineMaterial);
+          scene.add(axis);
+
+          // 軸ラベル (X, Y, Z)
+          const labelGeometry = new THREE.TextGeometry(label, { font, size: 0.05, height: 0.01 });
+          const labelMesh = new THREE.Mesh(labelGeometry, textMaterial);
+          labelMesh.position.add(direction.clone().multiplyScalar(axisMax + 0.1)); // 軸の少し外側に配置
+          scene.add(labelMesh);
+
+          // 元データ最小値ラベル
+          const dataMinGeometry = new THREE.TextGeometry(dataMin.toFixed(2), { font, size: 0.05, height: 0.01 });
+          const dataMinMesh = new THREE.Mesh(dataMinGeometry, blackTextMaterial);
+          dataMinMesh.position.add(direction.clone().multiplyScalar(axisMin)).add(perpendicular.clone().multiplyScalar(0.1));
+          scene.add(dataMinMesh);
+
+          // 元データ最大値ラベル
+          const dataMaxGeometry = new THREE.TextGeometry(dataMax.toFixed(2), { font, size: 0.05, height: 0.01 });
+          const dataMaxMesh = new THREE.Mesh(dataMaxGeometry, blackTextMaterial);
+          dataMaxMesh.position.add(direction.clone().multiplyScalar(axisMax)).add(perpendicular.clone().multiplyScalar(0.1));
+          scene.add(dataMaxMesh);
+        });
+      }
+
+      function drawAxis(list, dataMin, dataMax, direction) {
+          // 軸の線を描画
+          const lineMaterial = new THREE.LineBasicMaterial({ 
+              color: 0xFF0000,  // 赤色
+              transparent: true,  // 透明度を有効にする
+              opacity: 0.5  // 透明度を50%に設定
+          });
+
+          // 原点をlist（list.x, list.y, list.z）に設定
+          const origin = new THREE.Vector3(list.x, list.y, list.z);
+
+          // 軸の始点と終点を計算
+          const geometry = new THREE.BufferGeometry().setFromPoints([
+              origin.clone().add(direction.clone().multiplyScalar(dataMin)), // 軸の始点
+              origin.clone().add(direction.clone().multiplyScalar(dataMax))  // 軸の終点
+          ]);
+
+          // 軸を描画
+          const axis = new THREE.Line(geometry, lineMaterial);
+          scene.add(axis);
+
+          // カメラのnearとfarを0-1の範囲に設定
+          camera.near = 0;  // 近距離の描画範囲
+          camera.far = 1;   // 遠距離の描画範囲
+          camera.updateProjectionMatrix();  // カメラの投影行列を更新
+      }
+
+
+
+      createScatterPlot();
+
+      const clock = new THREE.Clock();
+      requestAnimationFrame(function animate() {
+        requestAnimationFrame(animate);
+        if (arToolkitSource.ready) {
+          arToolkitContext.update(arToolkitSource.domElement);
+          scene.visible = camera.visible;
+        }
+        renderer.render(scene, camera);
+      });
+    </script>
+  </body>
+</html>
